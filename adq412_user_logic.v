@@ -233,13 +233,12 @@ module adq412_user_logic
 	wire [95:0] pre_out_w;
 	reg pre_clock_enable_r;
 	reg pre_write_enable_r;
-	reg [14:0] pre_address_r;
+	reg [11:0] pre_address_r;
 	
 	blk_mem_gen_v4_3 pre_buffer (
 	.clka(clk_1_8),
-	.ena(pre_clock_enable_r),
 	.wea(pre_write_enable_r), // Bus [0 : 0] 
-	.addra(pre_address_r), // Bus [14 : 0] 
+	.addra(pre_address_r), // Bus [11 : 0] 
 	.dina(pre_in_r), // Bus [95 : 0] 
 	.douta(pre_out_w)); // Bus [95 : 0] 
 	
@@ -248,13 +247,12 @@ module adq412_user_logic
 	wire [95:0] post_out_w;
 	reg post_clock_enable_r;
 	reg post_write_enable_r;
-	reg [14:0] post_address_r;
+	reg [11:0] post_address_r;
 	
 	blk_mem_gen_v4_3 post_buffer (
 	.clka(clk_1_8),
-	.ena(post_clock_enable_r),
 	.wea(post_write_enable_r), // Bus [0 : 0] 
-	.addra(post_address_r), // Bus [14 : 0] 
+	.addra(post_address_r), // Bus [11 : 0] 
 	.dina(post_buffer_in_r), // Bus [95 : 0] 
 	.douta(post_buffer_out_w)); // Bus [95 : 0] 
 	
@@ -266,8 +264,9 @@ module adq412_user_logic
 	reg [ChanWidth-1:0] data_a_output_r;
 	reg data_valid_r;
 	
-	reg finish_push_pre;	//flag of finishing pushing all data in pre buffer
-	reg finish_push_post;	//flag of finishing pushing all data in post buffer
+	//reg finish_push_pre;	//flag of finishing pushing all data in pre buffer
+	//reg finish_push_post;	//flag of finishing pushing all data in post buffer
+	reg [11:0] counter3200;	//3200 cycle counter to counter cycles of pre&post buffer push out 50*512/8=3200
 	
 	//FSM
 	reg [2:0] state;
@@ -316,9 +315,9 @@ module adq412_user_logic
 				end
 			end
 		3'b100: begin
-				if((seven_bit_counter_2[6] == 0)&&(finish_push_pre == 1)) begin
+				if((seven_bit_counter_2[6] == 0)&&(counter3200 == 12'd3200)) begin
 					next_state = 3'b101;
-				end else if ((seven_bit_counter_2[6] == 0)&&(finish_push_pre == 0)) begin
+				end else if ((seven_bit_counter_2[6] == 0)&&(counter3200 ~= 12'd3200)) begin
 					next_state = 3'b011;
 				end else begin
 					next_state = 3'b100;
@@ -333,7 +332,7 @@ module adq412_user_logic
 			end
 		3'b110: begin
 				if(seven_bit_counter_2[6] == 0) begin
-					if(finish_push_post == 0) begin
+					if(counter3200 ~= 12'd3200) begin
 						next_state = 3'b101;
 					end else begin
 						if(cell_detected_r == 0) begin
@@ -354,20 +353,21 @@ module adq412_user_logic
 			cell_detected_r <= 0;
 			seven_bit_counter_2 <= 7'b0000000;
 			pre_write_enable_r <= 0;
-			pre_address_r <= 15'b111111111111111;		//initial to -1 so that first write address will be 0
+			pre_address_r <= 12'd3199;		//initial to 25599 so that first write address will be 0
 			pre_in_r <= 96'h000000000000000000000000;	
 			window_buffer <= 0;
 			
 			post_write_enable_r <= 0;
-			post_address_r <= 15'b111111111111111;		//initial to -1 so that first write address will be 0
+			post_address_r <= 12'd3199;		//initial to 25599 so that first write address will be 0
 			post_in_r <= 96'h000000000000000000000000;	
 			
 			data_a_output_r <= 96'h000000000000000000000000;
 			data_valid_r <= 0;
-			pre_address_detect_r <= 15'b000000000000000;
+			pre_address_detect_r <= 12'b000000000000000;
 			
-			finish_push_pre <= 0;
-			finish_push_post <= 0;
+			//finish_push_pre <= 0;
+			//finish_push_post <= 0;
+			counter3200 <= 12'd0;
 		end 
 		else begin
 			case(next_state)
@@ -377,7 +377,11 @@ module adq412_user_logic
 			3'b001: begin
 				seven_bit_counter_2 <= seven_bit_counter_2 + 1;
 				pre_write_enable_r <= 1;
-				pre_address_r <= pre_address_r + 1;
+				if(pre_address_r == 12'd3199) begin
+					pre_address_r <= 12'b0;
+				end else begin
+					pre_address_r <= pre_address_r + 1;
+				end
 				pre_in_r <= {x7_out,x6_out,x5_out,x4_out,x3_out,x2_out,x1_out,x0_out};
 				window_buffer[511:504] <= {x7_out,x6_out,x5_out,x4_out,x3_out,x2_out,x1_out,x0_out};
 				window_buffer[503:0] <= window_buffer[511:8];		//in window buffer #511 is latest sample high frequency, #0 is oldest sample low frequency
@@ -395,31 +399,59 @@ module adq412_user_logic
 				cell_detectd_r <= 0; //reset cell detect flag back to 0
 				seven_bit_counter_2 <= seven_bit_counter_2 + 1;
 				post_write_enable_r <= 1;
-				post_address_r <= post_address_r + 1;
+				if(post_address_r == 12'd3199) begin
+					post_address_r <= 12'b0;
+				end else begin
+					post_address_r <= post_address_r + 1;
+				end
 				post_in_r <= {x7_out,x6_out,x5_out,x4_out,x3_out,x2_out,x1_out,x0_out};
 				
 				pre_write_enable_r <= 0;
-				if(pre_address_r == 15'd25599) begin
-					pre_address_r <= 15'b0;
+				if(pre_address_r == 12'd3199) begin
+					pre_address_r <= 12'b0;
 				end else begin
 					pre_address_r <= pre_address_r + 1;
 				end
 				data_a_output_r <= pre_out_w;
 				data_valid_r <= 1'b1;
+				if(counter3200 == 12'd3200) begin	//reset 3200 counter 
+					counter3200 <= 12'd0;
+				end
 			end
 			3'b100: begin
 				seven_bit_counter_2 <= seven_bit_counter_2 + 1;
 				post_write_enable_r <= 0;
+
+				counter3200 <= counter3200 + 1;
 			end
 			3'b101: begin
 				seven_bit_counter_2 <= seven_bit_counter_2 + 1;
-				if(post_address_r == 15'd25599) begin
-					pre_address_r <= 15'b0;
+				if(post_address_r == 12'd3199) begin
+					post_address_r <= 12'b0;
 				end else begin
-					pre_address_r <= pre_address_r + 1;
+					post_address_r <= post_address_r + 1;
 				end
-				data_a_output_r <= pre_out_w;
+				data_a_output_r <= post_out_w;
 				data_valid_r <= 1'b1;
+				
+				pre_write_enable_r <= 1;
+				pre_address_r <= pre_address_r + 1;
+				pre_in_r <= {x7_out,x6_out,x5_out,x4_out,x3_out,x2_out,x1_out,x0_out};
+				window_buffer[511:504] <= {x7_out,x6_out,x5_out,x4_out,x3_out,x2_out,x1_out,x0_out};
+				window_buffer[503:0] <= window_buffer[511:8];
+				
+				if(counter3200 == 12'd3200) begin	//reset 3200 counter 
+					counter3200 <= 12'd0;
+				end
+			end
+			3'b110: begin
+				seven_bit_counter_2 <= seven_bit_counter_2 + 1;
+				pre_write_enable_r <= 0;
+				counter3200 <= counter3200 + 1;
+				
+				//construct cell detection logic here
+				
+				cell_detectd_r <= 0;
 			end
 			endcase
 		end
