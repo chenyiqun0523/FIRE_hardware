@@ -220,18 +220,18 @@ module adq412_user_logic
 	.x_out(x7_out), // Bus [11 : 0]
 	.clk(clk_1_8)); // Bus [11 : 0] 
 	
-	reg [15:0] next_out_r;     //16 shift registers to delay next_out signal by 16 clock cycles 
+	reg [16:0] next_out_r;     //16 shift registers to delay next_out signal by 16 clock cycles 
 	reg [6:0] seven_bit_counter_2;	//for cutting off half data
 	
 	
 	//256 samples buffer for cell detection
-	reg [11:0] window_buffer [511:0];	
+	reg [11:0]window_buffer[511:0];	
 	
 	
 	//50*512 samples 12-bit pre buffer using block RAM
 	reg [95:0] pre_in_r;
 	wire [95:0] pre_out_w;
-	reg pre_clock_enable_r;
+	//reg pre_clock_enable_r;
 	reg pre_write_enable_r;
 	reg [11:0] pre_address_r;
 	
@@ -245,7 +245,7 @@ module adq412_user_logic
 	//50*512 samples 12-bit post buffer using block RAM
 	reg [95:0] post_in_r;
 	wire [95:0] post_out_w;
-	reg post_clock_enable_r;
+	//reg post_clock_enable_r;
 	reg post_write_enable_r;
 	reg [11:0] post_address_r;
 	
@@ -276,7 +276,7 @@ module adq412_user_logic
 	always@(posedge clk_1_8)
 	begin
 		if (rst_i == 1'b1)			
-			state <= 3'b000;;		
+			state <= 3'b000;	
 		else
 			state <= next_state;
 	end	
@@ -285,7 +285,7 @@ module adq412_user_logic
 	begin
 		case(state)
 		3'b000:begin
-				if(next_out_r[15] == 1) begin
+				if(next_out_r[16] == 1) begin
 					next_state = 3'b001;
 				end else begin
 					next_state = 3'b000;
@@ -317,7 +317,7 @@ module adq412_user_logic
 		3'b100: begin
 				if((seven_bit_counter_2[6] == 0)&&(counter3200 == 12'd3200)) begin
 					next_state = 3'b101;
-				end else if ((seven_bit_counter_2[6] == 0)&&(counter3200 ~= 12'd3200)) begin
+				end else if ((seven_bit_counter_2[6] == 0)&&(counter3200 != 12'd3200)) begin
 					next_state = 3'b011;
 				end else begin
 					next_state = 3'b100;
@@ -332,7 +332,7 @@ module adq412_user_logic
 			end
 		3'b110: begin
 				if(seven_bit_counter_2[6] == 0) begin
-					if(counter3200 ~= 12'd3200) begin
+					if(counter3200 != 12'd3200) begin
 						next_state = 3'b101;
 					end else begin
 						if(cell_detected_r == 0) begin
@@ -347,7 +347,7 @@ module adq412_user_logic
 			end
 		endcase
 	end
-	
+	integer j;
 	always@(negedge clk_1_8) begin			//still deciding pos or neg edge of clock
 		if(rst_i) begin
 			cell_detected_r <= 0;
@@ -355,7 +355,7 @@ module adq412_user_logic
 			pre_write_enable_r <= 0;
 			pre_address_r <= 12'd3199;		//initial to 25599 so that first write address will be 0
 			pre_in_r <= 96'h000000000000000000000000;	
-			window_buffer <= 0;
+			//window_buffer <= 0;
 			
 			post_write_enable_r <= 0;
 			post_address_r <= 12'd3199;		//initial to 25599 so that first write address will be 0
@@ -383,20 +383,31 @@ module adq412_user_logic
 					pre_address_r <= pre_address_r + 1;
 				end
 				pre_in_r <= {x7_out,x6_out,x5_out,x4_out,x3_out,x2_out,x1_out,x0_out};
-				window_buffer[511:504] <= {x7_out,x6_out,x5_out,x4_out,x3_out,x2_out,x1_out,x0_out};
-				window_buffer[503:0] <= window_buffer[511:8];		//in window buffer #511 is latest sample high frequency, #0 is oldest sample low frequency
+
+				window_buffer[511] <= x7_out;
+				window_buffer[510] <= x6_out;
+				window_buffer[509] <= x5_out;
+				window_buffer[508] <= x4_out;
+				window_buffer[507] <= x3_out;
+				window_buffer[506] <= x2_out;
+				window_buffer[505] <= x1_out;
+				window_buffer[504] <= x0_out;
+	
+				for(j = 0; j<= 503; j=j+1) begin
+					window_buffer[j] <= window_buffer[j+8];	 //in window buffer #511 is latest sample high frequency, #0 is oldest sample low frequency
+				end						
 			end 
 			3'b010: begin
 				seven_bit_counter_2 <= seven_bit_counter_2 + 1;
 				pre_write_enable_r <= 0;	//turn off write enable of pre buffer
 				//construct cell detection logic here
 				
-				cell_detectd_r <= 0;	
+				cell_detected_r <= 0;	
 				
 				pre_address_detect_r <= pre_address_r;
 			end
 			3'b011: begin
-				cell_detectd_r <= 0; //reset cell detect flag back to 0
+				cell_detected_r <= 0; //reset cell detect flag back to 0
 				seven_bit_counter_2 <= seven_bit_counter_2 + 1;
 				post_write_enable_r <= 1;
 				if(post_address_r == 12'd3199) begin
@@ -437,8 +448,19 @@ module adq412_user_logic
 				pre_write_enable_r <= 1;
 				pre_address_r <= pre_address_r + 1;
 				pre_in_r <= {x7_out,x6_out,x5_out,x4_out,x3_out,x2_out,x1_out,x0_out};
-				window_buffer[511:504] <= {x7_out,x6_out,x5_out,x4_out,x3_out,x2_out,x1_out,x0_out};
-				window_buffer[503:0] <= window_buffer[511:8];
+
+				window_buffer[511] <= x7_out;
+				window_buffer[510] <= x6_out;
+				window_buffer[509] <= x5_out;
+				window_buffer[508] <= x4_out;
+				window_buffer[507] <= x3_out;
+				window_buffer[506] <= x2_out;
+				window_buffer[505] <= x1_out;
+				window_buffer[504] <= x0_out;
+	
+				for(j = 0; j<= 503; j=j+1) begin
+					window_buffer[j] <= window_buffer[j+8];	 //in window buffer #511 is latest sample high frequency, #0 is oldest sample low frequency
+				end	
 				
 				if(counter3200 == 12'd3200) begin	//reset 3200 counter 
 					counter3200 <= 12'd0;
@@ -451,7 +473,7 @@ module adq412_user_logic
 				
 				//construct cell detection logic here
 				
-				cell_detectd_r <= 0;
+				cell_detected_r <= 0;
 			end
 			endcase
 		end
@@ -460,11 +482,11 @@ module adq412_user_logic
 	always @(posedge clk_1_8) begin
 		if(rst_i) begin 
 			seven_bit_counter <= 7'b0000000;
-			next_out_r <= 16'h0000;
+			next_out_r <= 17'h0;
 		end
 		else begin
 			seven_bit_counter <= seven_bit_counter + 1;	//continuous incrementing
-			next_out_r <= {next_out_r[15:0],next_out};	//delay 16 cycles to compensate delay of translation IP	
+			next_out_r <= {next_out_r[16:0],next_out};	//delay 16 cycles to compensate delay of translation IP	
 		end
 	end
 	assign next = (seven_bit_counter==7'b0000001)?1:0;  //for continuous streaming, raise next signal every 128 clock cycles
